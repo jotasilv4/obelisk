@@ -19,6 +19,7 @@ pub mod notif_center;
 pub mod settings_app;
 pub mod settings_model;
 pub mod settings_pages;
+pub mod status_menu;
 pub mod store_pages;
 pub mod switcher;
 pub mod wallpaper;
@@ -67,6 +68,7 @@ pub struct Shell {
     pub about_app: about_app::AboutApp,
     pub welcome: welcome::Welcome,
     pub installer: installer::Installer,
+    pub status_menu: status_menu::StatusMenu,
     pub emoji: emoji::EmojiPicker,
     pub settings: settings_app::SettingsApp,
     pub widgets: widgets::Widgets,
@@ -118,6 +120,7 @@ impl Shell {
             about_app: Default::default(),
             welcome: Default::default(),
             installer: Default::default(),
+            status_menu: Default::default(),
             emoji: Default::default(),
             settings: Default::default(),
             widgets: Default::default(),
@@ -181,6 +184,8 @@ impl Shell {
         self.activity.open = false;
         self.force_quit.open = false;
         self.about_app.open = false;
+        self.status_menu.open = None;
+        self.status_menu.dragging = false;
         self.emoji.open = false;
         self.settings.open = false;
         if self.mission.open {

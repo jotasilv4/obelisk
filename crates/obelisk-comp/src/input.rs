@@ -36,6 +36,7 @@ const EDGE: i32 = 8;
 #[derive(Debug)]
 pub enum Hit {
     Lock,
+    StatusMenu,
     Installer,
     Welcome,
     AboutApp,
@@ -168,6 +169,29 @@ impl Obelisk {
                 }
             }
             "dockpeek" => self.dock_peek = true,
+            sp if sp.starts_with("clickbar:") => {
+                // clique simulado num ícone da barra (teste)
+                let item = match &sp[9..] {
+                    "som" => BarItem::Sound,
+                    "rede" => BarItem::Network,
+                    "bt" => BarItem::Bluetooth,
+                    _ => BarItem::ControlCenter,
+                };
+                let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(3000)), move |_, _, st| {
+                    if let Some((a, b)) = st.shell.menubar.item_x(item) {
+                        let p: Point<f64, Logical> = (((a + b) / 2.0) as f64, 12.0).into();
+                        tracing::warn!("teste: clique em {item:?} ({:.0}) → {:?}", p.x, st.shell.menubar.item_at(p.x));
+                        st.on_motion(p, 0);
+                        st.on_button(BTN_LEFT, ButtonState::Pressed, 0);
+                        st.on_button(BTN_LEFT, ButtonState::Released, 1);
+                        tracing::warn!("teste: Central de Controle aberta = {}", st.shell.cc.open);
+                    } else {
+                        tracing::warn!("teste: {item:?} não está na barra");
+                    }
+                    st.dirty = true;
+                    smithay::reexports::calloop::timer::TimeoutAction::Drop
+                });
+            }
             sp if sp.starts_with("resizetest") => {
                 // agarra a borda (direita ou canto inferior direito) do app em foco e arrasta 200×120
                 let Some(w) = self.focused_window() else { return };
@@ -428,6 +452,9 @@ impl Obelisk {
         }
         if sh.menu.as_ref().is_some_and(|m| m.contains(pos.x, pos.y)) {
             return Hit::Menu;
+        }
+        if sh.status_menu.contains(pos.x, pos.y) {
+            return Hit::StatusMenu;
         }
         if sh.cc.contains(pos.x, pos.y) {
             return Hit::Cc;
@@ -1439,6 +1466,7 @@ impl Obelisk {
         if let Some((from, start, serial, button)) = self.press_drag {
             if (pos.x - start.x).hypot(pos.y - start.y) > 5.0 {
                 self.press_drag = None;
+            self.shell.status_menu.dragging = false;
                 self.start_drag_out(from, serial, button, start);
             }
         }
@@ -1511,6 +1539,11 @@ impl Obelisk {
             if self.setctl.display_drag.is_some() {
                 self.display_drag_motion(pos.x, pos.y);
             }
+        }
+        if self.shell.status_menu.dragging {
+            let v = self.shell.status_menu.slider_value(pos.x);
+            self.services.set_volume(v);
+            self.dirty = true;
         }
         if let Hit::Emoji = hit {
             self.shell.emoji.hover = self.shell.emoji.at(pos.x, pos.y);
@@ -1698,6 +1731,14 @@ impl Obelisk {
             self.shell.emoji.open = false;
             return true;
         }
+        // menu de status aberto: clicar fora fecha (o ícone dele na barra alterna sozinho)
+        if self.shell.status_menu.open.is_some() && !matches!(hit, Hit::StatusMenu | Hit::Bar(Some(BarItem::Sound)) | Hit::Bar(Some(BarItem::Network)) | Hit::Bar(Some(BarItem::Bluetooth))) {
+            self.shell.status_menu.open = None;
+            self.dirty = true;
+            if !matches!(hit, Hit::Surface(_)) {
+                return true;
+            }
+        }
         if self.shell.activity.open && !matches!(hit, Hit::Activity) {
             self.shell.activity.open = false;
             if !matches!(hit, Hit::Surface(_)) {
@@ -1771,6 +1812,14 @@ impl Obelisk {
                 if left {
                     if let Some(h) = self.shell.welcome.hit(pos.x, pos.y) {
                         self.welcome_action(h);
+                    }
+                }
+                true
+            }
+            Hit::StatusMenu => {
+                if left {
+                    if let Some(h) = self.shell.status_menu.hit(pos.x, pos.y) {
+                        self.status_menu_action(h, pos);
                     }
                 }
                 true
@@ -1923,7 +1972,13 @@ impl Obelisk {
                         BarItem::Logo | BarItem::App | BarItem::File | BarItem::Edit | BarItem::View | BarItem::Window | BarItem::Go | BarItem::Help => self.open_bar_menu(item),
                         BarItem::Workspace(i) => self.switch_workspace(i),
                         BarItem::Battery => self.open_battery_menu(),
-                        BarItem::ControlCenter | BarItem::Sound | BarItem::Network | BarItem::Bluetooth => self.shell.cc.toggle(),
+                        BarItem::ControlCenter => {
+                            self.shell.status_menu.open = None;
+                            self.shell.cc.toggle();
+                        }
+                        BarItem::Sound => self.open_status_menu(crate::shell::status_menu::StatusKind::Sound),
+                        BarItem::Network => self.open_status_menu(crate::shell::status_menu::StatusKind::Network),
+                        BarItem::Bluetooth => self.open_status_menu(crate::shell::status_menu::StatusKind::Bluetooth),
                         BarItem::Recording => self.stop_recording(),
                         BarItem::Tray(i) => self.tray_click(i, button, pos),
                         BarItem::Clock => {
@@ -2372,6 +2427,107 @@ impl Obelisk {
             smithay::reexports::calloop::timer::TimeoutAction::Drop
         });
         let _ = pointer;
+    }
+
+    /// Abre (ou fecha, se já aberto) o menu de Som, Rede ou Bluetooth da barra.
+    pub fn open_status_menu(&mut self, kind: crate::shell::status_menu::StatusKind) {
+        if self.shell.status_menu.open == Some(kind) {
+            self.shell.status_menu.open = None;
+            self.dirty = true;
+            return;
+        }
+        self.shell.close_popups();
+        let m = &mut self.shell.status_menu;
+        m.open = Some(kind);
+        m.data = Default::default();
+        self.refresh_status_menu(kind);
+        self.dirty = true;
+    }
+
+    fn refresh_status_menu(&mut self, kind: crate::shell::status_menu::StatusKind) {
+        use smithay::reexports::calloop::channel;
+        let (tx, rx) = channel::channel::<crate::shell::status_menu::StatusData>();
+        let _ = self.loop_handle.insert_source(rx, move |ev, _, st| {
+            if let channel::Event::Msg(d) = ev {
+                if st.shell.status_menu.open == Some(kind) {
+                    st.shell.status_menu.data = d;
+                    st.dirty = true;
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::shell::status_menu::load(kind));
+        });
+    }
+
+    fn status_menu_action(&mut self, h: crate::shell::status_menu::StatusHit, pos: Point<f64, Logical>) {
+        use crate::shell::settings_model::q;
+        use crate::shell::status_menu::{StatusHit, StatusKind};
+        let Some(kind) = self.shell.status_menu.open else { return };
+        match h {
+            StatusHit::Slider => {
+                self.shell.status_menu.dragging = true;
+                let v = self.shell.status_menu.slider_value(pos.x);
+                self.services.set_volume(v);
+            }
+            StatusHit::Sink(i) => {
+                if let Some((name, ..)) = self.shell.status_menu.data.sinks.get(i).cloned() {
+                    for s in &mut self.shell.status_menu.data.sinks {
+                        s.2 = s.0 == name;
+                    }
+                    crate::apps::spawn(&format!("pactl set-default-sink {}", q(&name)));
+                }
+            }
+            StatusHit::WifiToggle => {
+                let on = !self.shell.status.wifi_on;
+                self.services.set_wifi(on);
+                self.shell.status.wifi_on = on;
+                if on {
+                    self.refresh_status_menu(kind);
+                }
+            }
+            StatusHit::Net(i) => {
+                let Some((ssid, _, secure, active, known)) = self.shell.status_menu.data.nets.get(i).cloned() else { return };
+                if active {
+                    self.shell.status_menu.open = None;
+                    self.open_internal("settings:wifi");
+                } else if secure && !known {
+                    // rede nova com senha: abre os Ajustes já no campo da senha dela
+                    self.shell.status_menu.open = None;
+                    self.open_internal("settings:wifi");
+                    self.setctl.expanded = Some(format!("net:{ssid}"));
+                    self.setctl.focus = Some(format!("wifi_pw:{ssid}"));
+                    self.refresh_settings_page();
+                } else {
+                    crate::apps::spawn(&format!("nmcli dev wifi connect {}", q(&ssid)));
+                    self.notify_local("Wi‑Fi", &format!("Conectando a {ssid}…"), false);
+                    self.shell.status_menu.open = None;
+                }
+            }
+            StatusHit::BtToggle => {
+                let on = !self.shell.status.bt_on;
+                self.services.set_bluetooth(on);
+                self.shell.status.bt_on = on;
+            }
+            StatusHit::Dev(i) => {
+                if let Some((mac, name, conn, ..)) = self.shell.status_menu.data.devices.get(i).cloned() {
+                    let action = if conn { "disconnect" } else { "connect" };
+                    crate::apps::spawn(&format!("bluetoothctl {action} {mac}"));
+                    self.notify_local("Bluetooth", &format!("{} {name}…", if conn { "Desconectando" } else { "Conectando" }), false);
+                    self.shell.status_menu.open = None;
+                }
+            }
+            StatusHit::Settings => {
+                self.shell.status_menu.open = None;
+                let page = match kind {
+                    StatusKind::Sound => "sound",
+                    StatusKind::Network => "wifi",
+                    StatusKind::Bluetooth => "bluetooth",
+                };
+                self.open_internal(&format!("settings:{page}"));
+            }
+        }
+        self.dirty = true;
     }
 
     fn installer_action(&mut self, h: crate::shell::installer::InstHit) {

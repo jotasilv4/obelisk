@@ -73,7 +73,11 @@ impl Obelisk {
         let open_bar = self.shell.menu.as_ref().and_then(|m| m.origin).or(if self.shell.cc.open {
             Some(crate::shell::menubar::BarItem::ControlCenter)
         } else {
-            None
+            self.shell.status_menu.open.map(|k| match k {
+                crate::shell::status_menu::StatusKind::Sound => crate::shell::menubar::BarItem::Sound,
+                crate::shell::status_menu::StatusKind::Network => crate::shell::menubar::BarItem::Network,
+                crate::shell::status_menu::StatusKind::Bluetooth => crate::shell::menubar::BarItem::Bluetooth,
+            })
         });
 
         let game = self.game.active;
@@ -152,6 +156,17 @@ impl Obelisk {
         }
         if shell.switcher.open {
             shell.switcher.update(&theme, &mut shell.icons, sw, sh, scale, bd);
+        }
+        if let Some(kind) = shell.status_menu.open {
+            use crate::shell::{menubar::BarItem, status_menu::StatusKind};
+            let item = match kind {
+                StatusKind::Sound => BarItem::Sound,
+                StatusKind::Network => BarItem::Network,
+                StatusKind::Bluetooth => BarItem::Bluetooth,
+            };
+            let anchor = shell.menubar.item_x(item).map(|(_, b)| b).unwrap_or(sw as f32 - 60.0);
+            let st = shell.status.clone();
+            shell.status_menu.update(&theme, &st, anchor, sw, sh, scale, bd);
         }
         if shell.cc.open {
             let st = shell.status.clone();
@@ -272,6 +287,10 @@ impl Obelisk {
         if sh_.nc.open {
             let (x, y) = sh_.nc.buf_pos();
             out.extend(sh_.nc.layer.element(renderer, phys(x, y), 1.0).map(Into::into));
+        }
+        if sh_.status_menu.open.is_some() {
+            let (x, y) = ((sh_.status_menu.pos.0 - 30.0) as i32, (sh_.status_menu.pos.1 - 30.0) as i32);
+            out.extend(sh_.status_menu.layer.element(renderer, phys(x, y), 1.0).map(Into::into));
         }
         if sh_.cc.open {
             let (x, y) = sh_.cc.buf_pos();
