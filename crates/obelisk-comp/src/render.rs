@@ -102,6 +102,7 @@ impl Obelisk {
         // ---- camadas de UI (CPU → textura)
         self.shell.wallpaper.update(sw, sh, scale, theme.appearance);
         let notch_drop = self.notch_drop_frac(pointer_loc);
+        self.update_dock_visibility();
         let special = if self.shell.settings.open { Some(self.settings_special()) } else { None };
         let shell = &mut self.shell;
         // Modo Jogo: sem vidro (o desfoque é o efeito mais caro)

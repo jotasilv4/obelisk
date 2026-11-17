@@ -31,7 +31,7 @@ use crate::ui::theme::{metrics, Appearance, Theme};
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
-const EDGE: i32 = 5;
+const EDGE: i32 = 8;
 
 #[derive(Debug)]
 pub enum Hit {
@@ -162,6 +162,56 @@ impl Obelisk {
             "dockmenu" => self.open_dock_menu(1),
             "notch" => self.shell.notch.open = true,
             "aboutapp" => self.on_menu_action(MenuAction::AboutApp),
+            "maximize" => {
+                if let Some(w) = self.focused_window() {
+                    self.toggle_maximize(&w);
+                }
+            }
+            "dockpeek" => self.dock_peek = true,
+            sp if sp.starts_with("resizetest") => {
+                // agarra a borda (direita ou canto inferior direito) do app em foco e arrasta 200×120
+                let Some(w) = self.focused_window() else { return };
+                let Some(loc) = self.space.element_location(&w) else { return };
+                let size = w.geometry().size;
+                let corner = sp.ends_with(":canto");
+                let p: Point<f64, Logical> = if corner {
+                    ((loc.x + size.w + 3) as f64, (loc.y + size.h + 3) as f64).into()
+                } else {
+                    ((loc.x + size.w + 3) as f64, (loc.y + size.h / 2) as f64).into()
+                };
+                let hit = self.hit_test(p);
+                tracing::warn!("teste: antes {}x{}; alvo {:?}", size.w, size.h, match &hit { Hit::Edge { edges, .. } => format!("Edge {edges:?}"), _ => "outro".into() });
+                if let Hit::Edge { window, edges } = hit {
+                    self.last_pointer = p;
+                    self.start_resize(&window, edges, BTN_LEFT, p);
+                    for k in 1..=8u32 {
+                        let to = p + Point::<f64, Logical>::from((200.0 * k as f64 / 8.0, if corner { 120.0 * k as f64 / 8.0 } else { 0.0 }));
+                        let _ = self.loop_handle.insert_source(
+                            smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(40 * k as u64)),
+                            move |_, _, st| {
+                                let pointer = st.seat.get_pointer().unwrap();
+                                let t = st.start_time.elapsed().as_millis() as u32;
+                                pointer.motion(st, None, &MotionEvent { location: to, serial: SERIAL_COUNTER.next_serial(), time: t });
+                                pointer.frame(st);
+                                smithay::reexports::calloop::timer::TimeoutAction::Drop
+                            },
+                        );
+                    }
+                    let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(500)), |_, _, st| {
+                        let pointer = st.seat.get_pointer().unwrap();
+                        let t = st.start_time.elapsed().as_millis() as u32;
+                        pointer.button(st, &ButtonEvent { button: BTN_LEFT, state: ButtonState::Released, serial: SERIAL_COUNTER.next_serial(), time: t });
+                        pointer.frame(st);
+                        smithay::reexports::calloop::timer::TimeoutAction::Drop
+                    });
+                    let _ = self.loop_handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(1500)), move |_, _, st| {
+                        if let Some(sz) = st.space.elements().find(|x| **x == w).map(|x| x.geometry().size) {
+                            tracing::warn!("teste: depois {}x{}", sz.w, sz.h);
+                        }
+                        smithay::reexports::calloop::timer::TimeoutAction::Drop
+                    });
+                }
+            }
             sp if sp.starts_with("open:") => self.open_internal(&sp[5..]),
             "jobtest" => self.start_job("Instalando Heroic".into(), "for p in 12 35 61; do printf 'Baixando com.heroicgameslauncher.hgl %s%%\\r' $p; sleep 1; done; sleep 30".into()),
             "checkupdates" => {
@@ -422,41 +472,55 @@ impl Obelisk {
                 continue;
             }
             let Some(loc) = self.space.element_location(w) else { continue };
+            let ssd = self.is_ssd(w);
+            // borda de redimensionar (janelas com a barra do Obelisk): 8 pt por fora + 4 pt por dentro,
+            // cantos de 16 pt redimensionam na diagonal. Vem antes do app, senão a borda de dentro é dele.
+            let (maximized, fullscreen) = {
+                let m = meta(w).lock().unwrap();
+                (m.maximized, m.fullscreen)
+            };
+            if ssd && !maximized && !fullscreen {
+                let size = w.geometry().size;
+                let f = Rectangle::<f64, Logical>::new((loc.x as f64, (loc.y - metrics::TITLEBAR_H) as f64).into(), (size.w as f64, (size.h + metrics::TITLEBAR_H) as f64).into());
+                let (out_b, in_b, corner) = (EDGE as f64, 4.0, 16.0);
+                let (l, r, t, btm) = (f.loc.x, f.loc.x + f.size.w, f.loc.y, f.loc.y + f.size.h);
+                let in_outer = pos.x >= l - out_b && pos.x < r + out_b && pos.y >= t - out_b && pos.y < btm + out_b;
+                let in_inner = pos.x >= l + in_b && pos.x < r - in_b && pos.y >= t + in_b && pos.y < btm - in_b;
+                // a faixa de cima por dentro é a barra de título (arrastar move), então só por fora
+                let top_inside = pos.y >= t && pos.y < t + in_b;
+                if in_outer && !in_inner && !(top_inside && pos.x > l + corner && pos.x < r - corner) {
+                    let mut edges = ResizeEdge::empty();
+                    let near_l = pos.x < l + in_b || (pos.x < l + corner && (pos.y < t + corner || pos.y > btm - corner));
+                    let near_r = pos.x >= r - in_b || (pos.x >= r - corner && (pos.y < t + corner || pos.y > btm - corner));
+                    let near_t = pos.y < t + in_b || (pos.y < t + corner && (pos.x < l + corner || pos.x >= r - corner));
+                    let near_b = pos.y >= btm - in_b || (pos.y >= btm - corner && (pos.x < l + corner || pos.x >= r - corner));
+                    if near_l {
+                        edges |= ResizeEdge::LEFT;
+                    } else if near_r {
+                        edges |= ResizeEdge::RIGHT;
+                    }
+                    if near_t {
+                        edges |= ResizeEdge::TOP;
+                    } else if near_b {
+                        edges |= ResizeEdge::BOTTOM;
+                    }
+                    if !edges.is_empty() {
+                        return Hit::Edge { window: w.clone(), edges };
+                    }
+                }
+            }
             if w.surface_under(pos - loc.to_f64(), WindowSurfaceType::ALL).is_some() {
                 return Hit::Surface(w.clone());
             }
-            if !self.is_ssd(w) {
+            if !ssd {
                 continue;
             }
             let size = w.geometry().size;
             let frame = Rectangle::<i32, Logical>::new((loc.x, loc.y - metrics::TITLEBAR_H).into(), (size.w, size.h + metrics::TITLEBAR_H).into());
-            let maximized = meta(w).lock().unwrap().maximized;
-            let b = if maximized { 0 } else { EDGE };
-            let outer = Rectangle::<i32, Logical>::new((frame.loc.x - b, frame.loc.y - b).into(), (frame.size.w + 2 * b, frame.size.h + 2 * b).into());
-            if !outer.to_f64().contains(pos) {
-                continue;
+            if frame.to_f64().contains(pos) && pos.y < loc.y as f64 {
+                let rel = pos - frame.loc.to_f64();
+                return Hit::Titlebar { window: w.clone(), button: deco::button_at(rel.x, rel.y) };
             }
-            if frame.to_f64().contains(pos) {
-                if pos.y < loc.y as f64 {
-                    let rel = pos - frame.loc.to_f64();
-                    return Hit::Titlebar { window: w.clone(), button: deco::button_at(rel.x, rel.y) };
-                }
-                continue;
-            }
-            let mut edges = ResizeEdge::empty();
-            if pos.x < frame.loc.x as f64 {
-                edges |= ResizeEdge::LEFT;
-            }
-            if pos.x >= (frame.loc.x + frame.size.w) as f64 {
-                edges |= ResizeEdge::RIGHT;
-            }
-            if pos.y < frame.loc.y as f64 {
-                edges |= ResizeEdge::TOP;
-            }
-            if pos.y >= (frame.loc.y + frame.size.h) as f64 {
-                edges |= ResizeEdge::BOTTOM;
-            }
-            return Hit::Edge { window: w.clone(), edges };
         }
         if !self.game.active {
             if let Some(i) = self.shell.desktop.hit(pos.x, pos.y) {
@@ -1370,6 +1434,7 @@ impl Obelisk {
         ));
 
         self.last_pointer = pos;
+        self.dock_peek_motion(pos);
         // item da Bandeja ou da mesa: arrastar 5 px vira arrasto de arquivo
         if let Some((from, start, serial, button)) = self.press_drag {
             if (pos.x - start.x).hypot(pos.y - start.y) > 5.0 {
@@ -1401,6 +1466,26 @@ impl Obelisk {
             }
         }
         let hit = self.hit_test(pos);
+        // cursor de redimensionar nas bordas das janelas
+        let pointer_grabbed = self.seat.get_pointer().is_some_and(|p| p.is_grabbed());
+        if !pointer_grabbed {
+            if let Hit::Edge { edges, .. } = &hit {
+                use smithay::input::pointer::CursorIcon as C;
+                let icon = match (edges.contains(ResizeEdge::TOP), edges.contains(ResizeEdge::BOTTOM), edges.contains(ResizeEdge::LEFT), edges.contains(ResizeEdge::RIGHT)) {
+                    (true, _, true, _) => C::NwResize,
+                    (true, _, _, true) => C::NeResize,
+                    (_, true, true, _) => C::SwResize,
+                    (_, true, _, true) => C::SeResize,
+                    (true, ..) | (_, true, ..) => C::NsResize,
+                    _ => C::EwResize,
+                };
+                self.cursor_status = smithay::input::pointer::CursorImageStatus::Named(icon);
+                self.edge_cursor = true;
+            } else if self.edge_cursor {
+                self.cursor_status = smithay::input::pointer::CursorImageStatus::default_named();
+                self.edge_cursor = false;
+            }
+        }
         self.shell.dock.hover = if let Hit::Dock(i) = hit { i } else { None };
         self.shell.notch.set_hover(matches!(hit, Hit::Notch));
         if let Some(m) = &mut self.shell.menu {

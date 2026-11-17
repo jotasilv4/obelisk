@@ -109,7 +109,11 @@ pub fn build(page: &str, ctx: &Ctx) -> Vec<Group> {
         "appearance" => vec![group("Mesa", vec![sw("widgets", ORANGE, "Widgets na mesa", "Relógio, calendário e sistema", ctx.on("widgets"), toggle(ctx, "widgets"))])],
         "wallpaper" => vec![group("", vec![note("Coloque imagens em ~/Imagens/Papéis de Parede para que apareçam aqui.")])],
         "dock" => vec![
-            group("Dock", vec![sw("zoom_in", BLUE, "Ampliação", "Ícones crescem sob o cursor", ctx.on("dock_magnify"), toggle(ctx, "dock_magnify"))]),
+            group("Dock", vec![
+                sw("zoom_in", BLUE, "Ampliação", "Ícones crescem sob o cursor", ctx.on("dock_magnify"), toggle(ctx, "dock_magnify")),
+                sw("dock_to_bottom", BLUE, "Ocultar e mostrar o Dock automaticamente", "Aparece ao encostar o mouse na borda de baixo", ctx.on("dock_autohide"), toggle(ctx, "dock_autohide")),
+                sw("fullscreen", GRAY, "Dock inteligente", "Some quando uma janela ocupa o espaço dele (maximizada, tela cheia)", ctx.get("dock_smart_hide") != "false", set("dock_smart_hide", if ctx.get("dock_smart_hide") != "false" { "false" } else { "true" })),
+            ]),
             group("Mesa", vec![
                 sw("space_dashboard", PURPLE, "Canto ativo", "Canto superior esquerdo abre o Mission Control", ctx.on("hot_corners"), toggle(ctx, "hot_corners")),
                 sw("view_carousel", BLUE, "Stage Manager", "App em foco no centro, os outros em miniaturas", ctx.on("stage_manager"), toggle(ctx, "stage_manager")),

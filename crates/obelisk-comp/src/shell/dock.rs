@@ -77,6 +77,12 @@ pub struct Dock {
     animating: bool,
     key: Option<String>,
     launchpad_icon: Option<Pixmap>,
+    /// esconder (ocultar automático ou janela por cima) — o Dock desliza para baixo da tela
+    pub hide: bool,
+    /// 1 = visível, 0 = escondido
+    pub reveal: f32,
+    /// placa na posição visível (para saber se uma janela está por cima)
+    pub shown_rect: (f32, f32, f32, f32),
 }
 
 impl Dock {
@@ -94,6 +100,9 @@ impl Dock {
             animating: false,
             key: None,
             launchpad_icon: None,
+            hide: false,
+            reveal: 1.0,
+            shown_rect: (0.0, 0.0, 0.0, 0.0),
         }
     }
 
@@ -141,6 +150,9 @@ impl Dock {
     }
 
     pub fn contains(&self, x: f64, y: f64) -> bool {
+        if self.reveal < 0.5 {
+            return false;
+        }
         let (px, py, pw, ph) = self.panel;
         let top = py - S * (MAX_SCALE - 1.0);
         (x as f32) >= px && (x as f32) <= px + pw && (y as f32) >= top && (y as f32) <= py + ph + BOTTOM
@@ -208,6 +220,14 @@ impl Dock {
                 }
             }
         }
+        // ---- mostrar/esconder (desliza ~180 ms)
+        let target = if self.hide { 0.0 } else { 1.0 };
+        self.reveal += (target - self.reveal) * (1.0 - (-dt / 0.06).exp());
+        if (self.reveal - target).abs() > 0.003 {
+            animating = true;
+        } else {
+            self.reveal = target;
+        }
         self.animating = animating;
 
         // ---- layout final: a placa só alarga
@@ -221,6 +241,10 @@ impl Dock {
         let plate_x = (buf_w - plate_w) / 2.0;
         let plate_y = TOP_ROOM;
         self.panel = (buf_x + plate_x, buf_y + plate_y, plate_w, PLATE_H);
+        self.shown_rect = self.panel;
+        let slide = (1.0 - self.reveal) * (PLATE_H + BOTTOM + 14.0);
+        self.panel.1 += slide;
+        self.buf_pos.1 = (buf_y + slide).round() as i32;
         self.slots.clear();
         let mut x = plate_x + PAD;
         for w in &sizes {

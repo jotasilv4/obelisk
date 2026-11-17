@@ -187,6 +187,11 @@ pub struct Obelisk {
     /// escala forçada ao desenhar (tela espelhada)
     pub render_scale: Option<f64>,
     pub force_update_check: bool,
+    /// Dock escondido chamado pelo mouse na borda de baixo; quando o mouse saiu dele
+    pub dock_peek: bool,
+    /// o cursor de redimensionar foi posto pelo Obelisk (borda de janela)
+    pub edge_cursor: bool,
+    pub dock_peek_left: Option<Instant>,
     /// rodando como tela de login (greetd)
     pub greeter: bool,
     /// dispositivos do libinput (backend nativo) para aplicar aceleração/rolagem
@@ -339,6 +344,9 @@ impl Obelisk {
             mirror: false,
             render_scale: None,
             force_update_check: false,
+            dock_peek: false,
+            edge_cursor: false,
+            dock_peek_left: None,
             input_devices: Vec::new(),
             tray: None,
             tray_items: Vec::new(),
@@ -560,10 +568,11 @@ impl Obelisk {
         self.focus_window(window);
     }
 
-    /// Área útil para janelas (abaixo da barra de menus, acima do dock).
+    /// Área útil para janelas (abaixo da barra de menus, acima do dock). Com o Dock que se esconde
+    /// (automático ou inteligente), as janelas maximizadas vão até embaixo e o Dock some.
     pub fn work_area(&self) -> Rectangle<i32, Logical> {
         let top = metrics::MENUBAR_H;
-        let bottom_reserved = (crate::shell::dock::PLATE_H + crate::shell::dock::BOTTOM) as i32 + 6;
+        let bottom_reserved = if self.dock_autohide() || self.dock_smart_hide() { 0 } else { (crate::shell::dock::PLATE_H + crate::shell::dock::BOTTOM) as i32 + 6 };
         Rectangle::new((0, top).into(), (self.screen.w, self.screen.h - top - bottom_reserved).into())
     }
 
@@ -1234,6 +1243,7 @@ impl Obelisk {
     pub fn animating(&self) -> bool {
         let sh = &self.shell;
         sh.dock.needs_redraw()
+            || self.dock_peek_left.is_some()
             || sh.notch.animating()
             || (!self.game.active && sh.status.media.as_ref().is_some_and(|m| m.playing))
             || sh.menu.as_ref().is_some_and(|m| m.alpha() < 1.0)
@@ -1884,5 +1894,70 @@ impl Obelisk {
             inst.step = 6;
         }
         self.dirty = true;
+    }
+}
+
+impl Obelisk {
+    pub fn dock_autohide(&self) -> bool {
+        self.settings.get("dock_autohide") == Some("true")
+    }
+
+    /// Dock inteligente (padrão): some quando uma janela ocupa o espaço dele.
+    pub fn dock_smart_hide(&self) -> bool {
+        self.settings.get("dock_smart_hide") != Some("false")
+    }
+
+    /// Decide se o Dock fica escondido neste quadro.
+    pub fn update_dock_visibility(&mut self) {
+        // saiu do Dock chamado pela borda: some depois de 0,3 s
+        if self.dock_peek && self.dock_peek_left.is_some_and(|t| t.elapsed().as_millis() > 300) {
+            self.dock_peek = false;
+            self.dock_peek_left = None;
+        }
+        let (dx, dy, dw, dh) = self.shell.dock.shown_rect;
+        let dock = Rectangle::<i32, Logical>::new((dx as i32, dy as i32).into(), (dw as i32, (dh + crate::shell::dock::BOTTOM) as i32).into());
+        let covered = self.dock_smart_hide()
+            && dw > 0.0
+            && self.space.elements().any(|w| {
+                if !Self::is_normal(w) || !self.on_stage(w) || meta(w).lock().unwrap().minimizing.is_some() {
+                    return false;
+                }
+                let Some(l) = self.space.element_location(w) else { return false };
+                let s = w.geometry().size;
+                Rectangle::<i32, Logical>::new((l.x, l.y - metrics::TITLEBAR_H).into(), (s.w, s.h + metrics::TITLEBAR_H).into()).overlaps(dock)
+            });
+        let busy = self.shell.dock.menu_open || self.shell.launchpad.open || self.shell.mission.open;
+        let hide = (self.dock_autohide() || covered) && !self.dock_peek && !busy;
+        if hide != self.shell.dock.hide {
+            self.shell.dock.hide = hide;
+            self.dirty = true;
+        }
+    }
+
+    /// Mouse na borda de baixo chama o Dock escondido; sair dele começa a contagem para sumir.
+    pub fn dock_peek_motion(&mut self, pos: Point<f64, Logical>) {
+        if !(self.dock_autohide() || self.dock_smart_hide()) {
+            return;
+        }
+        let h = self.screen.h as f64;
+        let on_primary = pos.x >= 0.0 && pos.x < self.screen.w as f64 && pos.y >= 0.0 && pos.y < h;
+        if on_primary && pos.y >= h - 2.0 {
+            self.dock_peek = true;
+            self.dock_peek_left = None;
+            self.dirty = true;
+            return;
+        }
+        if self.dock_peek {
+            // continua enquanto o mouse estiver sobre o Dock (com a folga da ampliação)
+            let (px, _, pw, _) = self.shell.dock.shown_rect;
+            let zone_top = h - (crate::shell::dock::PLATE_H + crate::shell::dock::BOTTOM) as f64 - 70.0;
+            let inside = on_primary && pos.y >= zone_top && pos.x >= px as f64 - 20.0 && pos.x <= (px + pw) as f64 + 20.0;
+            if inside {
+                self.dock_peek_left = None;
+            } else if self.dock_peek_left.is_none() {
+                self.dock_peek_left = Some(Instant::now());
+                self.dirty = true;
+            }
+        }
     }
 }
