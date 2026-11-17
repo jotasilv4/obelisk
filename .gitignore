@@ -1,0 +1,17 @@
+/target
+/work
+/out
+/repo
+/work-pkg
+/work-assets
+/work-vm
+/work-profile
+packaging/*/src/
+packaging/*/pkg/
+packaging/*/*.tar.gz
+packaging/*/*.pkg.tar.zst
+profile/airootfs/usr/share/icons/WhiteSur*
+profile/airootfs/usr/share/icons/MacTahoe-cursors
+profile/airootfs/usr/share/icons/default
+profile/airootfs/opt/obelisk-repo
+branding/plymouth/src/

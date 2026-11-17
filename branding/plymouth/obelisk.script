@@ -1,0 +1,111 @@
+// Obelisk: fundo preto, símbolo no centro e barra fina de progresso (como o boot do macOS).
+// Desligar/reiniciar: só o símbolo. Disco criptografado: campo de senha com pontos.
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+// imagens desenhadas em 2x; telas pequenas usam metade
+k = 0.5;
+if (sh >= 1400) k = 0.75;
+if (sh >= 2000) k = 1.0;
+
+logo.image = Image("logo.png");
+logo.image = logo.image.Scale(logo.image.GetWidth() * k * 1.1, logo.image.GetHeight() * k * 1.1);
+logo.sprite = Sprite(logo.image);
+logo.x = sw / 2 - logo.image.GetWidth() / 2;
+logo.y = sh / 2 - logo.image.GetHeight() / 2 - 30 * k;
+logo.sprite.SetPosition(logo.x, logo.y, 1);
+logo.sprite.SetOpacity(0);
+
+track.image = Image("track.png");
+track.image = track.image.Scale(track.image.GetWidth() * k, track.image.GetHeight() * k);
+track.sprite = Sprite(track.image);
+track.x = sw / 2 - track.image.GetWidth() / 2;
+track.y = logo.y + logo.image.GetHeight() + 90 * k;
+track.sprite.SetPosition(track.x, track.y, 1);
+
+fill.full = Image("fill.png");
+fill.full = fill.full.Scale(fill.full.GetWidth() * k, fill.full.GetHeight() * k);
+fill.sprite = Sprite();
+fill.sprite.SetPosition(track.x, track.y, 2);
+
+mode = Plymouth.GetMode();
+if (mode == "shutdown" || mode == "reboot") {
+    track.sprite.SetOpacity(0);
+}
+
+// o símbolo aparece suavemente; a barra acompanha o progresso do boot
+fade = 0;
+shown = 0;
+fun refresh_callback() {
+    if (fade < 1) {
+        fade = fade + 0.06;
+        if (fade > 1) fade = 1;
+        logo.sprite.SetOpacity(fade);
+    }
+}
+Plymouth.SetRefreshFunction(refresh_callback);
+
+fun progress_callback(duration, progress) {
+    if (mode == "shutdown" || mode == "reboot") return;
+    // a barra nunca volta e anda devagar no fim (o boot real termina antes)
+    p = Math.Clamp(progress * 1.15, 0, 1);
+    if (p < shown) p = shown;
+    shown = p;
+    w = Math.Int(fill.full.GetWidth() * p);
+    if (w < 1) w = 1;
+    fill.sprite.SetImage(fill.full.Crop(0, 0, w, fill.full.GetHeight()));
+}
+Plymouth.SetBootProgressFunction(progress_callback);
+
+// ---- senha do disco (LUKS)
+lock.image = Image("lock.png");
+lock.image = lock.image.Scale(lock.image.GetWidth() * k * 1.4, lock.image.GetHeight() * k * 1.4);
+entry.image = Image("entry.png");
+entry.image = entry.image.Scale(entry.image.GetWidth() * k, entry.image.GetHeight() * k);
+bullet.image = Image("bullet.png");
+bullet.image = bullet.image.Scale(bullet.image.GetWidth() * k, bullet.image.GetHeight() * k);
+
+fun display_normal_callback() {
+    lock.sprite = NULL;
+    entry.sprite = NULL;
+    prompt.sprite = NULL;
+    for (i = 0; bullets[i]; i++) bullets[i] = NULL;
+    track.sprite.SetOpacity(1);
+}
+
+fun display_password_callback(prompt_text, count) {
+    track.sprite.SetOpacity(0);
+    entry.x = sw / 2 - entry.image.GetWidth() / 2;
+    entry.y = track.y - 10 * k;
+    entry.sprite = Sprite(entry.image);
+    entry.sprite.SetPosition(entry.x, entry.y, 3);
+    lock.sprite = Sprite(lock.image);
+    lock.sprite.SetPosition(sw / 2 - lock.image.GetWidth() / 2, entry.y - lock.image.GetHeight() - 24 * k, 3);
+    text = "Digite a senha do disco";
+    if (prompt_text != "" && count == 0) text = "Digite a senha do disco";
+    prompt.image = Image.Text(text, 1, 1, 1, 0.85, "Inter 12");
+    prompt.sprite = Sprite(prompt.image);
+    prompt.sprite.SetPosition(sw / 2 - prompt.image.GetWidth() / 2, entry.y + entry.image.GetHeight() + 18 * k, 3);
+    for (i = 0; bullets[i]; i++) bullets[i] = NULL;
+    n = count;
+    if (n > 24) n = 24;
+    gap = bullet.image.GetWidth() * 1.6;
+    x0 = entry.x + 28 * k;
+    for (i = 0; i < n; i++) {
+        bullets[i] = Sprite(bullet.image);
+        bullets[i].SetPosition(x0 + i * gap, entry.y + entry.image.GetHeight() / 2 - bullet.image.GetHeight() / 2, 4);
+    }
+}
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+
+// mensagens do sistema (ex.: verificação de disco) em letra pequena, embaixo
+fun message_callback(text) {
+    msg.image = Image.Text(text, 1, 1, 1, 0.6, "Inter 10");
+    msg.sprite = Sprite(msg.image);
+    msg.sprite.SetPosition(sw / 2 - msg.image.GetWidth() / 2, sh - 60 * k - msg.image.GetHeight(), 5);
+}
+Plymouth.SetMessageFunction(message_callback);

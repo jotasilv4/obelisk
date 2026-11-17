@@ -1,0 +1,12 @@
+#!/bin/sh
+# Tela de login do Obelisk (greeter do greetd): o próprio compositor, só com a tela de bloqueio
+# e a lista de usuários. Nativo; se não subir, roda dentro do cage.
+export XDG_SESSION_TYPE=wayland
+export OBELISK_ASSETS=/usr/share/obelisk
+export OBELISK_XWAYLAND=0
+export XCURSOR_THEME=MacTahoe-cursors
+export XCURSOR_SIZE=24
+start=$(date +%s)
+obelisk-compositor --backend drm --greeter && exit 0
+[ $(( $(date +%s) - start )) -gt 10 ] && exit 1
+exec cage -s -- obelisk-compositor --backend winit --greeter

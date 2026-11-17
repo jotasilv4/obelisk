@@ -1,0 +1,8 @@
+NAME="Obelisk"
+PRETTY_NAME="Obelisk (base Arch Linux)"
+ID=obelisk
+ID_LIKE=arch
+BUILD_ID=rolling
+ANSI_COLOR="0;38;2;47;123;245"
+HOME_URL="https://github.com/jotasilv4/obelisk"
+LOGO=obelisk

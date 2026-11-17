@@ -1,0 +1,35 @@
+#!/bin/sh
+# Inicia a sessão gráfica do Obelisk.
+#
+#  Caminho padrão: nativo (DRM/KMS + libinput).
+#  Reserva: o compositor como cliente de um host kiosk (cage), se o nativo não subir.
+
+export OBELISK_SESSION=1
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Obelisk
+export XDG_SESSION_DESKTOP=Obelisk
+export OBELISK_ASSETS=/usr/share/obelisk
+export OBELISK_MOD=super
+export XCURSOR_THEME=MacTahoe-cursors
+export XCURSOR_SIZE=24
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM=wayland
+export ELECTRON_OZONE_PLATFORM_HINT=auto
+
+xdg-user-dirs-update >/dev/null 2>&1 || true
+
+# Padrão: nativo (DRM/KMS direto: VRR, jogo em tela cheia sem recomposição, várias telas).
+# Se ele não subir (GPU sem KMS, VM sem 3D…) em 10 s, cai para o modo compatível dentro do cage.
+# Forçar o compatível: opção de kernel obelisk.nested=1 ou OBELISK_BACKEND=nested.
+if [ "$OBELISK_BACKEND" != "nested" ] && ! grep -qw 'obelisk.nested=1' /proc/cmdline 2>/dev/null; then
+    start=$(date +%s)
+    obelisk-compositor --backend drm
+    rc=$?
+    [ "$rc" -eq 0 ] && exit 0
+    if [ $(( $(date +%s) - start )) -gt 10 ]; then
+        exit "$rc"   # caiu depois de rodar: não reabre escondido
+    fi
+    echo "obelisk: modo nativo falhou ($rc); usando o modo compatível" | systemd-cat -t obelisk 2>/dev/null || true
+fi
+
+exec cage -s -- obelisk-compositor --backend winit

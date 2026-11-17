@@ -1,0 +1,12 @@
+# Mantém a identidade do Obelisk mesmo quando o pacote "filesystem" do Arch é atualizado.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = filesystem
+Target = obelisk-desktop
+
+[Action]
+Description = Aplicando a identidade do Obelisk (os-release)...
+When = PostTransaction
+Exec = /usr/bin/install -m644 /usr/lib/obelisk/os-release /usr/lib/os-release

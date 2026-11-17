@@ -1,0 +1,4 @@
+{
+  "packages": ["networkmanager", "pciutils", "sudo"],
+  "services": ["NetworkManager"]
+}

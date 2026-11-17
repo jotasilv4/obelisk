@@ -1,0 +1,2 @@
+# último usuário que entrou (a tela de login começa nele)
+d /var/cache/obelisk-greeter 0755 greeter greeter -

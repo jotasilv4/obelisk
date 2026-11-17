@@ -1,0 +1,28 @@
+# Maintainer: Obelisk
+# Ícones WhiteSur e cursor MacTahoe (vinceliuice, GPL-3.0), nos commits que o Obelisk usa.
+pkgname=obelisk-themes
+_icons=73d8040da51a9ed74e47c7366e7e9ff437601a5c
+_cursor=839848b9a8a38a92a6936e30c4abe35cc6f2546d
+pkgver=2025.0
+pkgrel=1
+pkgdesc="Tema de ícones WhiteSur e cursor MacTahoe usados pelo Obelisk"
+arch=('any')
+url="https://github.com/vinceliuice/WhiteSur-icon-theme"
+license=('GPL-3.0-or-later')
+makedepends=('bash')
+source=("whitesur-$_icons.tar.gz::https://github.com/vinceliuice/WhiteSur-icon-theme/archive/$_icons.tar.gz"
+        "mactahoe-$_cursor.tar.gz::https://github.com/vinceliuice/MacTahoe-icon-theme/archive/$_cursor.tar.gz")
+sha256sums=('SKIP' 'SKIP')
+options=('!debug' '!strip')
+
+package() {
+  install -d "$pkgdir/usr/share/icons"
+  cd "$srcdir/WhiteSur-icon-theme-$_icons"
+  ./install.sh -d "$pkgdir/usr/share/icons" >/dev/null
+  cp -r "$srcdir/MacTahoe-icon-theme-$_cursor/cursors/dist" "$pkgdir/usr/share/icons/MacTahoe-cursors"
+  # cursor padrão do sistema
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/icons/default/index.theme" <<'THEME'
+[Icon Theme]
+Inherits=MacTahoe-cursors
+THEME
+}

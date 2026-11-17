@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Instalar o Obelisk
+Comment=Instala o Obelisk no computador
+Exec=obelisk-open installer
+Icon=obelisk
+Type=Application
+Categories=System;
+NoDisplay=false

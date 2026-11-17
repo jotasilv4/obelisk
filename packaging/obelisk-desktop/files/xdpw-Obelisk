@@ -1,0 +1,4 @@
+# xdg-desktop-portal-wlr no Obelisk: compartilha a tela principal (sem seletor por enquanto)
+[screencast]
+chooser_type=none
+max_fps=60

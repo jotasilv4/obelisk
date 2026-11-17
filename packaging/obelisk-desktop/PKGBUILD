@@ -1,0 +1,81 @@
+# Maintainer: Obelisk
+# Desktop Obelisk: compositor Wayland em Rust (Smithay), sessão, ativos de marca, PAM, portais e
+# identidade do sistema. Compila a partir desta árvore (scripts/build-repo.sh).
+pkgname=obelisk-desktop
+pkgver=0.1.0.202611162310
+pkgrel=1
+pkgdesc="Desktop Obelisk: compositor Wayland com o visual do macOS, focado em desempenho e jogos"
+arch=('x86_64')
+url="https://github.com/jotasilv4/obelisk"
+license=('GPL-3.0-or-later')
+depends=(
+  'plymouth' 'mesa' 'libinput' 'seatd' 'libxkbcommon' 'pam' 'polkit' 'dbus' 'xorg-xwayland' 'cage'
+  'greetd' 'pipewire' 'pipewire-pulse' 'pipewire-alsa' 'wireplumber'
+  'xdg-desktop-portal' 'xdg-desktop-portal-gtk' 'xdg-desktop-portal-wlr' 'xdg-user-dirs' 'xdg-utils'
+  'wl-clipboard' 'grim' 'ffmpeg' 'playerctl' 'brightnessctl' 'networkmanager' 'bluez' 'bluez-utils'
+  'pacman-contrib' 'flatpak' 'power-profiles-daemon' 'gamemode' 'gamescope' 'upower' 'curl' 'libnotify'
+  'inter-font' 'ttf-jetbrains-mono' 'noto-fonts' 'noto-fonts-emoji' 'ttf-material-symbols-variable'
+  'adwaita-icon-theme' 'obelisk-themes'
+  'foot' 'firefox' 'thunar' 'thunar-volman' 'gvfs' 'mousepad' 'gnome-calculator' 'loupe' 'mpv'
+)
+optdepends=(
+  'steam: jogos (repositório multilib)'
+  'mangohud: FPS e uso de CPU/GPU nos jogos'
+  'snapper: Instantâneos em discos btrfs'
+  'satty: anotar capturas de tela'
+  'cups: impressoras'
+  'flatpak: apps do Flathub'
+)
+makedepends=('cargo')
+backup=('etc/pam.d/obelisk-lock')
+install=obelisk-desktop.install
+options=('!debug')
+
+_root() { cd "$startdir/../.."; pwd; }
+
+pkgver() {
+  local v
+  v=$(grep -m1 "^version" "$(_root)/Cargo.toml" | cut -d\" -f2)
+  printf '%s.%s' "$v" "$(date +%Y%m%d%H%M)"
+}
+
+build() {
+  cd "$(_root)"
+  cargo build --release --locked -p obelisk-comp
+}
+
+package() {
+  local r f="$startdir/files"
+  r=$(_root)
+  install -Dm755 "$r/target/release/obelisk-compositor" "$pkgdir/usr/bin/obelisk-compositor"
+  install -Dm755 "$f/obelisk-session" "$pkgdir/usr/bin/obelisk-session"
+  install -Dm755 "$f/obelisk-greeter" "$pkgdir/usr/bin/obelisk-greeter"
+  install -Dm755 "$f/obelisk-open" "$pkgdir/usr/bin/obelisk-open"
+  install -Dm644 "$f/obelisk-settings.desktop" "$pkgdir/usr/share/applications/obelisk-settings.desktop"
+  install -Dm644 "$f/obelisk-store.desktop" "$pkgdir/usr/share/applications/obelisk-store.desktop"
+  install -Dm644 "$f/obelisk.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/obelisk.conf"
+  install -Dm644 "$f/obelisk.desktop" "$pkgdir/usr/share/wayland-sessions/obelisk.desktop"
+  install -Dm644 "$f/obelisk-lock.pam" "$pkgdir/etc/pam.d/obelisk-lock"
+  install -Dm644 "$f/greetd.toml" "$pkgdir/usr/share/obelisk/greetd.toml"
+  install -Dm644 "$f/gtk3-settings.ini" "$pkgdir/usr/share/obelisk/gtk-3.0/settings.ini"
+  install -Dm644 "$f/gtk4-settings.ini" "$pkgdir/usr/share/obelisk/gtk-4.0/settings.ini"
+  # portais: arquivos pelo GTK, tela pelo wlr (wlr-screencopy do compositor)
+  install -Dm644 "$f/obelisk-portals.conf" "$pkgdir/usr/share/xdg-desktop-portal/obelisk-portals.conf"
+  install -Dm644 "$f/xdpw-Obelisk" "$pkgdir/etc/xdg/xdg-desktop-portal-wlr/Obelisk"
+  # identidade (os-release) aplicada por gancho do pacman
+  install -Dm644 "$f/os-release" "$pkgdir/usr/lib/obelisk/os-release"
+  install -Dm644 "$f/obelisk-os-release.hook" "$pkgdir/usr/share/libalpm/hooks/obelisk-os-release.hook"
+  # marca: símbolo, ícone do app, wordmarks e papéis de parede
+  install -d "$pkgdir/usr/share/obelisk"
+  cp -a "$r/branding/svg" "$r/branding/png" "$r/branding/wallpapers" "$pkgdir/usr/share/obelisk/"
+  install -Dm644 "$r/branding/obelisk-symbol.svg" "$pkgdir/usr/share/obelisk/svg/obelisk-symbol.svg"
+  for s in 16 24 32 48 64 128 256 512; do
+    [ -f "$r/branding/png/sizes/obelisk-$s.png" ] && install -Dm644 "$r/branding/png/sizes/obelisk-$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/obelisk.png"
+  done
+  install -Dm644 "$r/branding/svg/obelisk-app-icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/obelisk.svg"
+  install -Dm644 "$r/branding/png/sizes/obelisk-128.png" "$pkgdir/usr/share/pixmaps/obelisk.png"
+  # inicialização: tema do Plymouth (símbolo + barra) e do GRUB (máquinas BIOS)
+  install -d "$pkgdir/usr/share/plymouth/themes/obelisk" "$pkgdir/usr/share/grub/themes/obelisk"
+  install -m644 "$r"/branding/plymouth/*.png "$r/branding/plymouth/obelisk.plymouth" "$r/branding/plymouth/obelisk.script" "$pkgdir/usr/share/plymouth/themes/obelisk/"
+  install -m644 "$r"/branding/grub/obelisk/* "$pkgdir/usr/share/grub/themes/obelisk/"
+}

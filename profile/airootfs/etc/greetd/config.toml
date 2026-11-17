@@ -1,0 +1,12 @@
+# Sessão LIVE: entra direto no desktop como "obelisk".
+# O sistema instalado usa /usr/share/obelisk/greetd.toml (tela de login gráfica, sem login automático).
+[terminal]
+vt = 1
+
+[default_session]
+command = "obelisk-greeter"
+user = "greeter"
+
+[initial_session]
+command = "obelisk-session"
+user = "obelisk"

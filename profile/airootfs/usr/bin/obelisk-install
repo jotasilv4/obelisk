@@ -1,0 +1,86 @@
+#!/bin/bash
+# Instalador do Obelisk.
+# 1) archinstall (disco, usuário, senha) com o sistema base;
+# 2) liga o multilib e o repositório do Obelisk no sistema instalado;
+# 3) instala o desktop (obelisk-desktop), jogos (Steam, Vulkan 32 bits) e o driver da sua GPU;
+# 4) liga a tela de login, rede, Bluetooth, energia e os Instantâneos (btrfs).
+set -euo pipefail
+
+[ "$EUID" -eq 0 ] || exec sudo "$0" "$@"
+
+TARGET="${OBELISK_TARGET:-/mnt/archinstall}"
+LOCAL_REPO=/opt/obelisk-repo
+
+cat <<MSG
+== Instalador do Obelisk ==
+O archinstall vai abrir. Escolha disco, usuário e senha.
+Em "Profile" deixe "Minimal": o Obelisk é instalado em seguida, com os drivers da sua GPU.
+Ao terminar o archinstall, NÃO desmonte ${TARGET}: este script continua a instalação.
+MSG
+read -r -p "Continuar? [s/N] " ok
+[[ "$ok" =~ ^[sS]$ ]] || exit 1
+
+archinstall --config /usr/share/obelisk/archinstall-config.json || true
+
+if ! mountpoint -q "$TARGET"; then
+    echo "Alvo $TARGET não está montado. Monte o sistema instalado e rode:"
+    echo "  OBELISK_TARGET=/ponto/de/montagem obelisk-install"
+    exit 1
+fi
+
+echo "==> repositórios: multilib e Obelisk"
+CONF="$TARGET/etc/pacman.conf"
+# multilib (Steam e bibliotecas de 32 bits do Vulkan/Mesa)
+sed -i '/^#\[multilib\]$/,/^#Include/ s/^#//' "$CONF"
+mkdir -p "$TARGET/var/lib/obelisk/repo"
+cp -a "$LOCAL_REPO/." "$TARGET/var/lib/obelisk/repo/"
+if ! grep -q '^\[obelisk\]' "$CONF"; then
+    {
+        echo
+        echo "# Obelisk: desktop, temas e atualizações do sistema"
+        echo "[obelisk]"
+        echo "SigLevel = Optional TrustAll"
+        if [ -s /usr/share/obelisk/repo-url ]; then
+            echo "Server = $(cat /usr/share/obelisk/repo-url)"
+        fi
+        echo "Server = file:///var/lib/obelisk/repo"
+    } >> "$CONF"
+fi
+
+echo "==> detectando a GPU"
+GPU=$(lspci -nn | grep -Ei 'vga|3d|display' || true)
+DRIVERS=()
+if grep -qi nvidia <<<"$GPU"; then
+    # nvidia-open: placas Turing (GTX 16xx/RTX 20xx) em diante
+    DRIVERS+=(nvidia-open nvidia-utils lib32-nvidia-utils nvidia-settings)
+    echo "   NVIDIA: driver proprietário (módulos abertos)"
+fi
+if grep -Eqi 'amd|ati|radeon' <<<"$GPU"; then
+    DRIVERS+=(vulkan-radeon lib32-vulkan-radeon libva-mesa-driver)
+    echo "   AMD: Mesa RADV"
+fi
+if grep -qi intel <<<"$GPU"; then
+    DRIVERS+=(vulkan-intel lib32-vulkan-intel intel-media-driver)
+    echo "   Intel: Mesa ANV"
+fi
+GAMES=(steam lib32-mesa lib32-pipewire lib32-gamemode mangohud lib32-mangohud vulkan-icd-loader lib32-vulkan-icd-loader)
+
+echo "==> instalando o Obelisk"
+arch-chroot "$TARGET" pacman -Sy --needed --noconfirm obelisk-desktop obelisk-themes "${DRIVERS[@]}" "${GAMES[@]}"
+
+echo "==> serviços e tela de login"
+install -m644 "$TARGET/usr/share/obelisk/greetd.toml" "$TARGET/etc/greetd/config.toml"
+arch-chroot "$TARGET" systemctl enable greetd.service NetworkManager.service bluetooth.service power-profiles-daemon.service || true
+arch-chroot "$TARGET" ln -sf /usr/lib/systemd/system/greetd.service /etc/systemd/system/display-manager.service || true
+# o greeter roda o compositor no modo nativo: precisa acessar vídeo e entrada
+arch-chroot "$TARGET" usermod -aG video,input greeter 2>/dev/null || true
+
+# Instantâneos (como o Time Machine do sistema): snapper + snap-pac em discos btrfs
+if [ "$(findmnt -no FSTYPE "$TARGET" 2>/dev/null)" = "btrfs" ]; then
+    echo "==> disco btrfs: ligando instantâneos automáticos (snapper)"
+    arch-chroot "$TARGET" pacman -S --needed --noconfirm snapper snap-pac || true
+    arch-chroot "$TARGET" snapper --no-dbus -c root create-config / || true
+    arch-chroot "$TARGET" systemctl enable snapper-timeline.timer snapper-cleanup.timer || true
+fi
+
+echo "Pronto. Remova a mídia e reinicie."

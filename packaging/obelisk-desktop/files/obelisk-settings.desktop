@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Ajustes do Sistema
+Name[en]=System Settings
+Comment=Wi‑Fi, som, telas, jogos e mais
+Exec=obelisk-open settings
+Icon=preferences-system
+Type=Application
+Categories=Settings;System;
+Keywords=preferências;configurações;ajustes;

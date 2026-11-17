@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Obelisk
+Comment=Desktop Obelisk (compositor Wayland em Rust)
+Exec=obelisk-session
+Type=Application
+DesktopNames=Obelisk

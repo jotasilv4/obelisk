@@ -1,0 +1,12 @@
+[Unit]
+Description=Cria o usuario da sessao live do Obelisk
+Before=greetd.service systemd-user-sessions.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c 'id obelisk >/dev/null 2>&1 || { useradd -m -s /usr/bin/zsh -G wheel,video,audio,input,storage obelisk; passwd -d obelisk; }'
+
+[Install]
+WantedBy=multi-user.target

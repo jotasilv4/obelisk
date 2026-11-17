@@ -1,0 +1,189 @@
+#!/bin/bash
+# Instalação automática do Obelisk (usada pelo instalador gráfico; roda como root).
+#   obelisk-install-auto /caminho/config
+# config (KEY=VALUE, apagado ao terminar): DISK FULLNAME USERNAME PASSWORD HOSTNAME TIMEZONE
+#   KEYMAP (br|us|us-intl) LOCALE (pt_BR.UTF-8…) ENCRYPT (0|1)
+# Saída para o instalador: "PROGRESS <0-100> <texto>", "ERROR <texto>", "DONE".
+set -Eeuo pipefail
+
+CONFIG="$1"
+# shellcheck disable=SC1090
+source "$CONFIG"
+rm -f "$CONFIG"
+
+MNT=/mnt/obelisk
+LOG=/var/log/obelisk-install.log
+exec 3>&1 1>>"$LOG" 2>&1
+progress() { echo "PROGRESS $1 $2" >&3; echo "== $2"; }
+fail() { echo "ERROR $1" >&3; exit 1; }
+trap 'fail "Falhou na linha $LINENO (detalhes em $LOG)"' ERR
+
+[ -b "$DISK" ] || fail "Disco $DISK não encontrado"
+[ -n "${USERNAME:-}" ] && [ -n "${PASSWORD:-}" ] || fail "Usuário e senha são obrigatórios"
+UEFI=0; [ -d /sys/firmware/efi ] && UEFI=1
+[ "$UEFI" = 0 ] && [ "${ENCRYPT:-0}" = 1 ] && fail "Criptografia só em computadores UEFI"
+
+progress 1 "Verificando a internet"
+ping -c1 -W5 archlinux.org >/dev/null 2>&1 || ping -c1 -W5 1.1.1.1 >/dev/null 2>&1 || fail "Sem internet: conecte-se a uma rede e tente de novo"
+
+# ---------------------------------------------------------------- disco
+progress 3 "Preparando o disco"
+umount -R "$MNT" 2>/dev/null || true
+cryptsetup close obelisk-root 2>/dev/null || true
+swapoff -a || true
+wipefs -af "$DISK"
+sgdisk -Z "$DISK"
+if [ "$UEFI" = 1 ]; then
+    sgdisk -n1:0:+1G -t1:ef00 -c1:EFI -n2:0:0 -t2:8304 -c2:Obelisk "$DISK"
+else
+    sgdisk -n1:0:+1M -t1:ef02 -c1:BIOS -n2:0:0 -t2:8304 -c2:Obelisk "$DISK"
+fi
+partprobe "$DISK" || true
+udevadm settle
+P=""; [[ "$DISK" =~ [0-9]$ ]] && P="p"
+PART1="${DISK}${P}1"; PART2="${DISK}${P}2"
+
+ROOTDEV="$PART2"
+if [ "${ENCRYPT:-0}" = 1 ]; then
+    progress 5 "Criptografando o disco"
+    printf %s "$PASSWORD" | cryptsetup luksFormat --type luks2 -q "$PART2" -d -
+    printf %s "$PASSWORD" | cryptsetup open "$PART2" obelisk-root -d -
+    ROOTDEV=/dev/mapper/obelisk-root
+fi
+
+progress 7 "Criando o sistema de arquivos"
+mkfs.btrfs -f -L Obelisk "$ROOTDEV"
+mount "$ROOTDEV" "$MNT" 2>/dev/null || { mkdir -p "$MNT"; mount "$ROOTDEV" "$MNT"; }
+for sv in @ @home @log @cache; do btrfs subvolume create "$MNT/$sv"; done
+umount "$MNT"
+OPTS=noatime,compress=zstd:1
+mount -o "$OPTS,subvol=@" "$ROOTDEV" "$MNT"
+mkdir -p "$MNT"/{home,var/log,var/cache,boot}
+mount -o "$OPTS,subvol=@home" "$ROOTDEV" "$MNT/home"
+mount -o "$OPTS,subvol=@log" "$ROOTDEV" "$MNT/var/log"
+mount -o "$OPTS,subvol=@cache" "$ROOTDEV" "$MNT/var/cache"
+if [ "$UEFI" = 1 ]; then
+    mkfs.fat -F32 -n EFI "$PART1"
+    mount "$PART1" "$MNT/boot"
+fi
+
+# ---------------------------------------------------------------- pacotes
+CONF=/tmp/obelisk-pacman.conf
+sed '/^#\[multilib\]$/,/^#Include/ s/^#//' /etc/pacman.conf > "$CONF"
+grep -q '^\[obelisk\]' "$CONF" || printf '\n[obelisk]\nSigLevel = Optional TrustAll\nServer = file:///opt/obelisk-repo\n' >> "$CONF"
+
+GPU=$(lspci -nn | grep -Ei 'vga|3d|display' || true)
+PKGS=(base linux linux-firmware sof-firmware intel-ucode amd-ucode btrfs-progs dosfstools networkmanager sudo
+      plymouth pacman-contrib flatpak snapper snap-pac obelisk-desktop obelisk-themes
+      steam lib32-mesa lib32-pipewire lib32-gamemode mangohud lib32-mangohud vulkan-icd-loader lib32-vulkan-icd-loader)
+grep -qi nvidia <<<"$GPU" && PKGS+=(nvidia-open nvidia-utils lib32-nvidia-utils nvidia-settings)
+grep -Eqi 'amd|ati|radeon' <<<"$GPU" && PKGS+=(vulkan-radeon lib32-vulkan-radeon libva-mesa-driver)
+grep -qi intel <<<"$GPU" && PKGS+=(vulkan-intel lib32-vulkan-intel intel-media-driver)
+[ "${ENCRYPT:-0}" = 1 ] && PKGS+=(cryptsetup)
+[ "$UEFI" = 0 ] && PKGS+=(grub)
+
+progress 10 "Baixando e instalando o sistema"
+# o pacman mostra "(n/N) instalando…": vira 10–70 %
+pacstrap -C "$CONF" -K "$MNT" "${PKGS[@]}" 2>&1 | while IFS= read -r line; do
+    echo "$line"
+    if [[ "$line" =~ \(\ *([0-9]+)/([0-9]+)\)\ (installing|instalando)\ ([^ .]+) ]]; then
+        n=${BASH_REMATCH[1]}; t=${BASH_REMATCH[2]}
+        echo "PROGRESS $(( 10 + 60 * n / t )) Instalando ${BASH_REMATCH[4]} ($n de $t)" >&3
+    fi
+done
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "A instalação dos pacotes falhou (internet ou espelho?)"
+
+# ---------------------------------------------------------------- configuração
+progress 72 "Configurando o sistema"
+genfstab -U "$MNT" >> "$MNT/etc/fstab"
+# repositórios no sistema instalado: multilib + Obelisk (cópia local; endereço público se houver)
+sed -i '/^#\[multilib\]$/,/^#Include/ s/^#//' "$MNT/etc/pacman.conf"
+mkdir -p "$MNT/var/lib/obelisk/repo"
+cp -a /opt/obelisk-repo/. "$MNT/var/lib/obelisk/repo/"
+{
+    echo; echo "# Obelisk: desktop, temas e atualizações do sistema"; echo "[obelisk]"; echo "SigLevel = Optional TrustAll"
+    [ -s /usr/share/obelisk/repo-url ] && echo "Server = $(cat /usr/share/obelisk/repo-url)"
+    echo "Server = file:///var/lib/obelisk/repo"
+} >> "$MNT/etc/pacman.conf"
+
+ch() { arch-chroot "$MNT" "$@"; }
+ch ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+ch hwclock --systohc || true
+sed -i "s/^#\(${LOCALE} UTF-8\)/\1/; s/^#\(en_US.UTF-8 UTF-8\)/\1/" "$MNT/etc/locale.gen"
+ch locale-gen
+echo "LANG=$LOCALE" > "$MNT/etc/locale.conf"
+case "$KEYMAP" in
+    br) VC=br-abnt2; XKB=br ;;
+    us-intl) VC=us-acentos; XKB="us(intl)" ;;
+    *) VC=us; XKB=us ;;
+esac
+echo "KEYMAP=$VC" > "$MNT/etc/vconsole.conf"
+echo "$HOSTNAME" > "$MNT/etc/hostname"
+printf '127.0.0.1 localhost\n::1 localhost\n127.0.1.1 %s.localdomain %s\n' "$HOSTNAME" "$HOSTNAME" > "$MNT/etc/hosts"
+
+progress 76 "Criando sua conta"
+ch useradd -m -G wheel,video,input,audio -c "$FULLNAME" -s /bin/bash "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PASSWORD" | ch chpasswd
+ch passwd -l root
+echo '%wheel ALL=(ALL:ALL) ALL' > "$MNT/etc/sudoers.d/10-wheel"
+chmod 440 "$MNT/etc/sudoers.d/10-wheel"
+# preferências iniciais do Obelisk (teclado escolhido no instalador)
+install -d "$MNT/home/$USERNAME/.config/obelisk"
+echo "kb_layout=$XKB" > "$MNT/home/$USERNAME/.config/obelisk/settings"
+ch chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.config"
+
+# ---------------------------------------------------------------- inicialização
+progress 80 "Preparando a inicialização"
+ENC_HOOK=""; [ "${ENCRYPT:-0}" = 1 ] && ENC_HOOK="encrypt"
+echo "HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block plymouth $ENC_HOOK filesystems fsck)" > "$MNT/etc/mkinitcpio.conf.d/obelisk.conf"
+printf '[Daemon]\nTheme=obelisk\nShowDelay=0\nDeviceTimeout=8\n' > "$MNT/etc/plymouth/plymouthd.conf"
+ch mkinitcpio -P
+
+ROOT_UUID=$(blkid -s UUID -o value "$ROOTDEV")
+CMD="root=UUID=$ROOT_UUID rootflags=subvol=@ rw"
+if [ "${ENCRYPT:-0}" = 1 ]; then
+    LUKS_UUID=$(blkid -s UUID -o value "$PART2")
+    CMD="cryptdevice=UUID=$LUKS_UUID:obelisk-root root=/dev/mapper/obelisk-root rootflags=subvol=@ rw"
+fi
+QUIET="quiet splash loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
+
+progress 86 "Instalando o carregador de inicialização"
+if [ "$UEFI" = 1 ]; then
+    # como no Mac: sem menu (segure Espaço ao ligar para ver as opções)
+    ch bootctl install --esp-path=/boot
+    printf 'default obelisk.conf\ntimeout 0\nconsole-mode max\neditor no\n' > "$MNT/boot/loader/loader.conf"
+    printf 'title   Obelisk\nlinux   /vmlinuz-linux\ninitrd  /initramfs-linux.img\noptions %s %s\n' "$CMD" "$QUIET" > "$MNT/boot/loader/entries/obelisk.conf"
+    printf 'title   Obelisk (recuperação)\nlinux   /vmlinuz-linux\ninitrd  /initramfs-linux-fallback.img\noptions %s\n' "$CMD" > "$MNT/boot/loader/entries/obelisk-fallback.conf"
+    ch systemctl enable systemd-boot-update.service || true
+else
+    ch grub-install --target=i386-pc "$DISK"
+    FONT=$(find "$MNT/usr/share/fonts" -iname 'Inter-Regular*.otf' -o -iname 'Inter-Regular*.ttf' 2>/dev/null | head -1)
+    [ -n "$FONT" ] && ch grub-mkfont -s 20 -o /usr/share/grub/themes/obelisk/inter-20.pf2 "${FONT#"$MNT"}" || true
+    sed -i -e 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Obelisk"/' \
+           -e 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=0/' \
+           -e 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=hidden/' \
+           -e "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$QUIET\"|" \
+           -e "s|^#\?GRUB_THEME=.*|GRUB_THEME=\"/usr/share/grub/themes/obelisk/theme.txt\"|" "$MNT/etc/default/grub"
+    grep -q '^GRUB_THEME=' "$MNT/etc/default/grub" || echo 'GRUB_THEME="/usr/share/grub/themes/obelisk/theme.txt"' >> "$MNT/etc/default/grub"
+    ch grub-mkconfig -o /boot/grub/grub.cfg
+fi
+
+# ---------------------------------------------------------------- serviços
+progress 92 "Ativando serviços"
+install -m644 "$MNT/usr/share/obelisk/greetd.toml" "$MNT/etc/greetd/config.toml"
+ch systemctl enable greetd.service NetworkManager.service bluetooth.service power-profiles-daemon.service fstrim.timer
+ch ln -sf /usr/lib/systemd/system/greetd.service /etc/systemd/system/display-manager.service
+ch usermod -aG video,input greeter || true
+ch flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+# Instantâneos (papel do Time Machine)
+ch snapper --no-dbus -c root create-config / || true
+ch systemctl enable snapper-timeline.timer snapper-cleanup.timer || true
+# a rede escolhida no live vai junto
+cp -a /etc/NetworkManager/system-connections/. "$MNT/etc/NetworkManager/system-connections/" 2>/dev/null || true
+
+progress 98 "Terminando"
+sync
+umount -R "$MNT"
+[ "${ENCRYPT:-0}" = 1 ] && cryptsetup close obelisk-root || true
+progress 100 "Pronto"
+echo "DONE" >&3

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=App Store
+Comment=Apps e jogos do Flathub
+Exec=obelisk-open store
+Icon=Appstore
+Type=Application
+Categories=System;PackageManager;
+Keywords=loja;apps;instalar;flathub;

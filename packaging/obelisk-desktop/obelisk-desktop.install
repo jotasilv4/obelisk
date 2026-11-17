@@ -1,0 +1,16 @@
+post_install() {
+  systemd-tmpfiles --create /usr/lib/tmpfiles.d/obelisk.conf 2>/dev/null || true
+  # sessão: o greetd do Obelisk (só se ainda for o padrão do pacote greetd)
+  if [ -f /etc/greetd/config.toml ] && grep -Eq 'agreety|tuigreet' /etc/greetd/config.toml; then
+    install -m644 /usr/share/obelisk/greetd.toml /etc/greetd/config.toml
+  fi
+  # preferências GTK do Obelisk, sem sobrescrever as do administrador
+  for v in gtk-3.0 gtk-4.0; do
+    [ -f "/etc/$v/settings.ini" ] || install -Dm644 "/usr/share/obelisk/$v/settings.ini" "/etc/$v/settings.ini"
+  done
+  echo ">> Ative a tela de login: systemctl enable greetd"
+}
+
+post_upgrade() {
+  post_install
+}

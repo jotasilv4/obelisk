@@ -1,0 +1,5 @@
+#!/bin/sh
+# Apps internos do Obelisk (Ajustes, App Store, Instalador) são abertos pelo próprio compositor
+# a partir do Dock, do Launchpad e da Busca.
+echo "Abra pelo Dock, Launchpad ou Busca (⌘ Espaço): $*" >&2
+exit 1

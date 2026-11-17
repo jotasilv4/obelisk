@@ -1,0 +1,7 @@
+# Tela de login do Obelisk (o greetd chama o greeter como o usuário "greeter")
+[terminal]
+vt = 1
+
+[default_session]
+command = "obelisk-greeter"
+user = "greeter"

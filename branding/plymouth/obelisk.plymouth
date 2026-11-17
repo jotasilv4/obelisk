@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Obelisk
+Description=Inicialização do Obelisk: símbolo e barra de progresso, como no macOS
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/obelisk
+ScriptFile=/usr/share/plymouth/themes/obelisk/obelisk.script
