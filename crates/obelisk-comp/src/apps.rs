@@ -107,6 +107,15 @@ pub fn load() -> Vec<App> {
         }
     }
     apps.sort_by_key(|a| a.name.to_lowercase());
+    // modo demonstração (capturas do README): só apps comuns, nada do que a máquina tem instalado
+    if std::env::var_os("OBELISK_DEMO_USER").is_some() {
+        const DEMO: [&str; 20] = [
+            "firefox", "thunar", "org.xfce.Thunar", "foot", "steam", "discord", "com.discordapp.Discord", "org.gnome.Calculator",
+            "gnome-calculator", "org.xfce.mousepad", "mousepad", "obelisk-settings", "obelisk-store", "net.lutris.Lutris",
+            "mpv", "org.gnome.Loupe", "com.heroicgameslauncher.hgl", "org.gnome.TextEditor", "brave-browser", "org.kde.krita",
+        ];
+        apps.retain(|a| DEMO.contains(&a.id.as_str()) || a.name == "Monitor de Atividade");
+    }
     apps
 }
 

@@ -366,6 +366,7 @@ impl Obelisk {
                 std::ffi::CStr::from_ptr((*pw).pw_gecos).to_string_lossy().split(',').next().unwrap_or("").to_string()
             }
         };
+        let gecos = crate::lock::demo().map(|d| d.1).unwrap_or(gecos);
         crate::shell::settings_app::Special {
             user: if gecos.trim().is_empty() { crate::lock::current_user() } else { gecos },
             avatar: self.setctl.avatar.clone().flatten(),

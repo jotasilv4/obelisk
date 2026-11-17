@@ -351,7 +351,7 @@ impl Obelisk {
             user_host: format!(
                 "{}@{}",
                 crate::lock::current_user(),
-                std::fs::read_to_string("/etc/hostname").map(|h| h.trim().to_string()).unwrap_or_else(|_| "obelisk".into())
+                if crate::lock::demo().is_some() { "obelisk".to_string() } else { std::fs::read_to_string("/etc/hostname").map(|h| h.trim().to_string()).unwrap_or_else(|_| "obelisk".into()) }
             ),
             lock_minutes: std::env::var("OBELISK_LOCK_MINUTES").ok().and_then(|v| v.parse().ok()).unwrap_or(10),
             xwayland_shell_state,

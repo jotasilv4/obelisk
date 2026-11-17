@@ -88,7 +88,18 @@ pub fn authenticate(user: &str, password: &str) -> bool {
     }
 }
 
+/// Modo de demonstração (capturas para o README): OBELISK_DEMO_USER="Nome Completo" troca o
+/// usuário, o nome e a máquina por dados de exemplo.
+pub fn demo() -> Option<(String, String)> {
+    let full = std::env::var("OBELISK_DEMO_USER").ok().filter(|v| !v.is_empty())?;
+    let login = full.split_whitespace().next().unwrap_or("usuario").to_lowercase();
+    Some((login, full))
+}
+
 pub fn current_user() -> String {
+    if let Some((login, _)) = demo() {
+        return login;
+    }
     std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| unsafe {
         let pw = libc::getpwuid(libc::getuid());
         if pw.is_null() {
@@ -101,6 +112,9 @@ pub fn current_user() -> String {
 
 /// Nome completo (campo GECOS) ou o login.
 fn display_name(user: &str) -> String {
+    if let Some((_, full)) = demo() {
+        return full;
+    }
     unsafe {
         let pw = libc::getpwuid(libc::getuid());
         if !pw.is_null() && !(*pw).pw_gecos.is_null() {
@@ -118,6 +132,9 @@ fn display_name(user: &str) -> String {
 
 /// Usuários que podem entrar: uid 1000–59999 com shell de login.
 pub fn login_users() -> Vec<(String, String)> {
+    if let Some(d) = demo() {
+        return vec![d, ("joao".into(), "João Lima".into())];
+    }
     std::fs::read_to_string("/etc/passwd")
         .unwrap_or_default()
         .lines()

@@ -11,6 +11,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/01-desktop.jpg" alt="Mesa do Obelisk com terminal, widgets e o Dock" width="100%">
+</p>
+
 O Obelisk não usa GNOME, KDE nem Hyprland. O compositor Wayland e todo o shell (barra de menus, Dock,
 notch, Busca, Launchpad, Mission Control, Central de Controle, Ajustes, App Store, tela de login e
 instalador) são código deste repositório, feito sobre o [Smithay](https://github.com/Smithay/smithay).
@@ -49,6 +53,25 @@ instalador) são código deste repositório, feito sobre o [Smithay](https://git
 - **Atualizações:** verificadas sozinhas e aplicadas dentro dos Ajustes; Instantâneos (snapper) em btrfs.
 - **Protocolos Wayland:** compartilhar a tela (wlr‑screencopy + portal), xdg‑activation, fractional‑scale, presentation‑time, text‑input/input‑method e security‑context (Flatpak).
 
+## Capturas
+
+> Capturas feitas com o Obelisk rodando aninhado, com o usuário de exemplo "Maria Souza".
+
+| | |
+|---|---|
+| ![Notch aberto tocando música](docs/screenshots/02-notch.jpg) | ![Launchpad](docs/screenshots/03-launchpad.jpg) |
+| **Notch:** música com a capa, agenda e Modo Jogo | **Launchpad** com categorias |
+| ![Mission Control](docs/screenshots/04-mission.jpg) | ![Central de Controle no modo claro](docs/screenshots/05-control-center.jpg) |
+| **Mission Control** com as mesas | **Central de Controle** (modo claro) |
+| ![Busca](docs/screenshots/06-spotlight.jpg) | ![Menu Editar](docs/screenshots/12-menu.jpg) |
+| **Busca** (⌘ Espaço) | **Barra de menus** com Arquivo, Editar, Visualizar… |
+| ![Ajustes › Telas](docs/screenshots/07-settings-displays.jpg) | ![App Store](docs/screenshots/08-store.jpg) |
+| **Ajustes › Telas:** arraste os monitores | **App Store** com apps do Flathub |
+| ![Tela de login](docs/screenshots/10-login.jpg) | ![Instalador](docs/screenshots/09-installer.jpg) |
+| **Tela de login** com troca de usuário | **Instalador gráfico** |
+| ![Assistente de boas-vindas](docs/screenshots/11-welcome.jpg) | |
+| **Assistente** de primeiro uso | |
+
 ## Estado
 
 O desktop foi desenvolvido e verificado rodando **aninhado**, como uma janela dentro de outro compositor.
@@ -81,6 +104,10 @@ real é o **⌘ (Super)**, que também chega aos apps como Ctrl (⌘C, ⌘V, ⌘
 Para testar sem interagir, use `--debug-ui` para abrir uma tela específica e `--debug-capture 5000:arquivo.png`
 para capturá-la depois de 5 s e encerrar. Exemplos: `settings:displays`, `open:store`, `installer:2`,
 `welcome`, `notch`, `launchpad`, `mission`, `cc` e `menu:edit`.
+
+Para capturas de divulgação, `OBELISK_DEMO_USER="Maria Souza"` troca usuário, máquina, discos e lista de
+apps por dados de exemplo, e `OBELISK_VIRTUAL_SIZE=1600x1000` desenha numa tela desse tamanho,
+independente da janela.
 
 ## Gerar a ISO e testar numa máquina virtual
 

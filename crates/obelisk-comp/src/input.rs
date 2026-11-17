@@ -172,8 +172,8 @@ impl Obelisk {
                 self.shell.installer.show();
                 let inst = &mut self.shell.installer;
                 inst.step = sp.strip_prefix("installer:").and_then(|n| n.parse().ok()).unwrap_or(0);
-                // dados de exemplo para as capturas
-                if inst.disks.is_empty() {
+                // dados de exemplo para as capturas (no modo demonstração, nunca os discos reais)
+                if inst.disks.is_empty() || crate::lock::demo().is_some() {
                     inst.disks = vec![
                         crate::shell::installer::Disk { path: "/dev/nvme0n1".into(), model: "Samsung SSD 980 PRO 1TB".into(), size_gb: 1000.2, kind: "SSD NVMe".into() },
                         crate::shell::installer::Disk { path: "/dev/sda".into(), model: "Kingston A400".into(), size_gb: 240.1, kind: "Disco".into() },

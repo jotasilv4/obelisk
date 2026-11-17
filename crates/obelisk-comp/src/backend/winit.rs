@@ -21,7 +21,12 @@ pub fn init(event_loop: &mut EventLoop<'static, Obelisk>, state: &mut Obelisk) -
     backend.window().set_cursor_visible(false);
 
     let scale = state.scale;
-    let mode = Mode { size: backend.window_size(), refresh: 60_000 };
+    // OBELISK_VIRTUAL_SIZE=LxA: tela de tamanho fixo, independente da janela (capturas do README)
+    let virtual_size = std::env::var("OBELISK_VIRTUAL_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once('x')?;
+        Some(smithay::utils::Size::<i32, smithay::utils::Physical>::from((w.parse().ok()?, h.parse().ok()?)))
+    });
+    let mode = Mode { size: virtual_size.unwrap_or_else(|| backend.window_size()), refresh: 60_000 };
     let output = Output::new(
         "obelisk-winit".to_string(),
         PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "Obelisk".into(), model: "Aninhado".into() },
@@ -66,7 +71,7 @@ pub fn init(event_loop: &mut EventLoop<'static, Obelisk>, state: &mut Obelisk) -
     event_loop.handle().insert_source(winit_loop, move |event, _, state| {
         let mut backend = backend.borrow_mut();
         match event {
-        WinitEvent::Resized { size, .. } => {
+        WinitEvent::Resized { size, .. } if virtual_size.is_none() => {
             output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
             state.screen = size.to_f64().to_logical(state.fscale).to_i32_round();
             state.dirty = true;
@@ -78,7 +83,7 @@ pub fn init(event_loop: &mut EventLoop<'static, Obelisk>, state: &mut Obelisk) -
         }
         WinitEvent::Redraw => {
             // o tamanho real da janela pode mudar sem um evento de resize (re-tile do host)
-            let size = backend.window_size();
+            let size = virtual_size.unwrap_or_else(|| backend.window_size());
             if size != output.current_mode().map(|m| m.size).unwrap_or(size) {
                 output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
                 state.screen = size.to_f64().to_logical(state.fscale).to_i32_round();
